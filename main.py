@@ -101,20 +101,35 @@ def strategy(buy_amt, SL=0.985, Target=1.02, open_position=False):
     while True:
         strategy(15)
 
-# frame = pd.DataFrame(client.get_historical_klines('BTCUSDT', '12h','72000' + 'min ago UTC'))
-# frame = frame.iloc[:, :6]
-# frame.columns = ['Time', 'Open', 'High', 'Low', 'Close', 'Volume']
+frame = pd.DataFrame(client.get_historical_klines('AAVEUSDT', '15m','600' + 'min ago UTC'))
+frame = frame.iloc[:, :6]
+frame.columns = ['Time', 'Open', 'High', 'Low', 'Close', 'Volume']
+frame=frame.reset_index()
+levels=[]
+for index, row in frame.iterrows():
+    levels.append(row['High'])
+    levels.append(row['Low'])
+    # levels.append(row['Close'])
+    # levels.append(row['Open'])
+print(levels)
+levels=sorted(levels)
+zones=[]
+zone=[]
+for i in range(0,len(levels)):
+    if len(zone)==0:
+        zone.append(levels[i])
+        continue
+    if float(zone[-1])*1.005>float(levels[i]):
+        zone.append(levels[i])
+    else:
+        if len(zone)>2:
+            zones.append(zone)
+        zone=[]
+print(zones)
+#delete low length zones (this is levels, actually)
+# print(frame)
 # print(frame.loc[lambda frame: frame['Volume'].astype(float)>50000])
 
-#oreder book data via json:
-# url= 'https://api.binance.com/api/v3/depth'
-# params={
-#     "symbol":symbol,
-#     "limit":2,
-# }
-# data=requests.get(url,params).json()
-# print(data)
-
-ob=custom_order_book(symbol="BTCUSDT",limit=60)
-# ob=ob[ob.quantity>0]
-print(ob)
+# ob=custom_order_book(symbol="BTCUSDT",custom_interval_multiplicator=100,limit=300)
+# ob=ob[ob.quantity>6]
+# print(ob)
