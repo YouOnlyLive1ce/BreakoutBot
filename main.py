@@ -100,8 +100,8 @@ def strategy(buy_amt, SL=0.985, Target=1.02, open_position=False):
         time.sleep(20)
     while True:
         strategy(15)
-
-frame = pd.DataFrame(client.get_historical_klines('BSWUSDT', '5m','1500' + 'min ago UTC'))
+symbol='XECUSDT'
+frame = pd.DataFrame(client.get_historical_klines(symbol, '15m','2000' + 'min ago UTC'))
 frame = frame.iloc[:, :6]
 frame.columns = ['Time', 'Open', 'High', 'Low', 'Close', 'Volume']
 frame=frame.reset_index()
@@ -109,26 +109,48 @@ levels=[]
 for index, row in frame.iterrows():
     levels.append(row['High'])
     levels.append(row['Low'])
-    # levels.append(row['Close'])
+    levels.append(row['Close'])
     # levels.append(row['Open'])
 levels=sorted(levels)
 print(levels)
-zones=[]
-zone=[]
-for i in range(0,len(levels)):
-    if len(zone)==0:
-        zone.append(levels[i])
-        continue
-    #TODO:automate step percent determining
-    if float(zone[-1])*1.005>float(levels[i]):
-        zone.append(levels[i])
-    else:
-        if len(zone)>2:
-            zones.append(zone)
-        zone=[]
+def combine_levels(levels,step_percent=1.005):
+    zones = []
+    zone = []
+    for i in range(0,len(levels)):
+        if len(zone)==0:
+            zone.append(levels[i])
+            continue
+        #TODO:automate step percent determining
+        if float(zone[-1])*step_percent>float(levels[i]):
+            zone.append(levels[i])
+        else:
+            if len(zone)>2:
+                zones.append(zone)
+            zone=[]
+    return zones
+step_percent=1.005
+rewardrisk=3
+zones=combine_levels(levels)
+
+# exclude uninformative zones
+# zones=filter(lambda zone: len(zone)>4,zones)
+# TODO: separate low range zones=levels (determine percent) from actual zones
+priceChangePercent=Decimal(client.get_ticker(symbol=symbol)['priceChangePercent'])/rewardrisk
+for i in range (len(zones)):
+    # if zone is large, divide into small zones with less step_percent
+    if Decimal(zones[i][-1])/Decimal(zones[i][0])>1+abs(priceChangePercent)/100:
+        large_zone_levels=zones[i]
+        combine_levels(large_zone_levels,step_percent/rewardrisk/2)
+        for j in range(len(large_zone_levels)):
+            large_zone_levels.append(large_zone_levels[i])
 for zone in zones:
         print(zone[0],zone[-1])
-#TODO:separate low range zones=levels (determine percent) from actual zones
+print()
+zones=filter(lambda zone: Decimal(zone[-1])/Decimal(zone[0])>step_percent**1.5,zones)
+for zone in zones:
+        print(zone[0],zone[-1])
+
+#>1.00'dailycahge'% delete zones
 
 # print(frame)
 # print(frame.loc[lambda frame: frame['Volume'].astype(float)>50000])
@@ -138,7 +160,7 @@ for zone in zones:
 # print(ob)
 
 # algorithm:
-# 1) choose only top growth/fall coins
+# 1) choose only top volatile+large volume coins
 # 2) find zones and levels
 # 3) check how many percent till this levels
 # 4) if not much(<5%) turn on algorithm
