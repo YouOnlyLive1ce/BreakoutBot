@@ -1,21 +1,20 @@
 from binance.client import Client
 import keys
 import pandas as pd
-import time
-import requests
 import math
 from decimal import Decimal
 
-client = Client(keys.api_key, keys.secret_key)
-
-
-def top_coin():
+def top_volatile_and_volume_coins(amount_to_show=3):
+    '''return all coins and their data. Do not call this function frequently.'''
     # filter only usdt
     all_tickers = pd.DataFrame(client.get_ticker())
-    usdt = all_tickers[all_tickers.symbol.str.contains('USDT')]
-    work = usdt[~((usdt.symbol.str.contains('UP')) | (usdt.symbol.str.contains('DOWN')))]
-    top_coin = work[work.priceChangePercent == work.priceChangePercent.max()]
-    top_coin = top_coin.symbol.values[0]
+    work = all_tickers[all_tickers.symbol.str.contains('USDT')]
+    work = work[work['quoteVolume'].astype(float) > 100000000]
+    work = work[~((work.symbol.str.contains('UP')) | (work.symbol.str.contains('DOWN')))]
+    work['priceChangePercent'] = pd.to_numeric(work['priceChangePercent'])
+    work['absolutePriceChangePercent'] = work['priceChangePercent'].abs()
+    top_coin = work.sort_values(by=['absolutePriceChangePercent'])
+    top_coin = top_coin.symbol.values[-amount_to_show:]
     return top_coin
 
 
@@ -64,73 +63,68 @@ def last_data(symbol, interval, lookback):
     return frame
 
 
-def strategy(buy_amt, SL=0.985, Target=1.02, open_position=False):
-    try:
-        asset = top_coin()
-        df = last_data(asset, '1m', '120')
-    except:
-        time.sleep(61)
-        asset = top_coin()
-        df = last_data(asset, '1m', '120')
+# def strategy(buy_amt, SL=0.985, Target=1.02, open_position=False):
+#     try:
+#         asset = top_coin()
+#         df = last_data(asset, '1m', '120')
+#     except:
+#         time.sleep(61)
+#         asset = top_coin()
+#         df = last_data(asset, '1m', '120')
+#
+#     qty = round(buy_amt / df.Close.iloc[-1], 1)
+#
+#     if ((df.Close.pct_change() + 1).cumprod()).iloc[-1] > 1:
+#         print(asset)
+#         print(df.Close.iloc[-1])
+#         print(qty)
+#         order = client.create_order(symbol=asset, side='BUY', type='MARKET', quantity=qty)
+#         print(order)
+#         buyprice = float(order['fills'][0]['price'])
+#         open_position = True
+#
+#         while open_position:
+#             try:
+#                 df = last_data(asset, '1m', '2')
+#             except:
+#                 print('Restart after 1 min')
+#                 time.sleep(61)
+#                 df = last_data(asset, '1m', '2')
+#
+#             print(f'Price ' + str(df.Close[-1]))
+#             print(f'Target ' + str(buyprice * Target))
+#             print(f'Stop ' + str(buyprice * SL))
+#             if df.Close[-1] <= buyprice * SL or df.Close[-1] >= buyprice * Target:
+#                 order = client.create_order(symbol=asset, side='SELL', type='MARKET', quantity=qty)
+#                 print(order)
+#                 break
+#     else:
+#         print('No find')
+#         time.sleep(20)
+#     while True:
+#         strategy(15)
 
-    qty = round(buy_amt / df.Close.iloc[-1], 1)
-
-    if ((df.Close.pct_change() + 1).cumprod()).iloc[-1] > 1:
-        print(asset)
-        print(df.Close.iloc[-1])
-        print(qty)
-        order = client.create_order(symbol=asset, side='BUY', type='MARKET', quantity=qty)
-        print(order)
-        buyprice = float(order['fills'][0]['price'])
-        open_position = True
-
-        while open_position:
-            try:
-                df = last_data(asset, '1m', '2')
-            except:
-                print('Restart after 1 min')
-                time.sleep(61)
-                df = last_data(asset, '1m', '2')
-
-            print(f'Price ' + str(df.Close[-1]))
-            print(f'Target ' + str(buyprice * Target))
-            print(f'Stop ' + str(buyprice * SL))
-            if df.Close[-1] <= buyprice * SL or df.Close[-1] >= buyprice * Target:
-                order = client.create_order(symbol=asset, side='SELL', type='MARKET', quantity=qty)
-                print(order)
-                break
-    else:
-        print('No find')
-        time.sleep(20)
-    while True:
-        strategy(15)
-
-
-symbol = 'FLOWUSDT'
-frame = pd.DataFrame(client.get_historical_klines(symbol, '15m', '2000' + 'min ago UTC'))
-frame = frame.iloc[:, :6]
-frame.columns = ['Time', 'Open', 'High', 'Low', 'Close', 'Volume']
-frame = frame.reset_index()
-levels = []
-for index, row in frame.iterrows():
-    levels.append(row['High'])
-    levels.append(row['Low'])
-    levels.append(row['Close'])
-    # levels.append(row['Open'])
-levels = sorted(levels)
-print(levels)
+def coin_levels(symbol,interval,lookback):
+    frame=last_data(symbol,interval,lookback)
+    levels = []
+    for index, row in frame.iterrows():
+        levels.append(row['High'])
+        levels.append(row['Low'])
+        levels.append(row['Close'])
+        # levels.append(row['Open'])
+    levels = sorted(levels)
+    return levels
 
 
-def combine_levels(levels, step_percent=1.005):
+def combine_coin_levels(levels, step_percent=1.005):
     zones = []
     zone = []
-    for i in range(0, len(levels)):
+    for level in levels:
         if len(zone) == 0:
-            zone.append(levels[i])
+            zone.append(level)
             continue
-        # TODO:automate step percent determining
-        if float(zone[-1]) * step_percent > float(levels[i]):
-            zone.append(levels[i])
+        if (Decimal(zone[-1])/Decimal(zone[0]))<step_percent:
+            zone.append(level)
         else:
             if len(zone) > 2:
                 zones.append(zone)
@@ -138,7 +132,7 @@ def combine_levels(levels, step_percent=1.005):
     return zones
 
 
-def percent_change_till_zone(zone,current_price):
+def percent_change_till_zone(zone, current_price):
     # for every zone, calculate price percent change till next zone over current price
     priceChange = 0
     # if current price is lower than zone
@@ -146,38 +140,48 @@ def percent_change_till_zone(zone,current_price):
         priceChange = 1 / min(current_price / Decimal(zone[-1]), current_price / Decimal(zone[0]))
     # if current price is higher than zone
     elif (current_price / Decimal(zone[0])) > 1 and (current_price / Decimal(zone[-1])) > 1:
-        priceChange = -max(current_price / Decimal(zone[0]), current_price / Decimal(zone[-1]))+1
+        priceChange = -max(current_price / Decimal(zone[0]), current_price / Decimal(zone[-1])) + 1
     # if current price is into consolidation
     elif (current_price / Decimal(zone[0])) > 1 and (current_price / Decimal(zone[-1])) < 1:
         priceChange = min(current_price / Decimal(zone[-1]) - 1, 1 / current_price / Decimal(zone[0]))
     return priceChange
 
-step_percent = 1.005
+def clear_coin_zones_data(symbol,zones,rewardrisk,step_percent=1.005):
+    # determine max percent of zone
+    priceChangePercent = Decimal(client.get_ticker(symbol=symbol)['priceChangePercent']) / rewardrisk
+    for zone in zones:
+        if (zone[-1]/zone[0])>1+priceChangePercent/1000:
+            splitted_zone=combine_coin_levels(zone,step_percent-0.001)
+            splitted_zone=filter(lambda zone:len(zone)>3,splitted_zone)
+            zones.remove(zone)
+            for little_zone in splitted_zone:
+                zones.append(little_zone)
+    return zones
+    # current_price = Decimal(client.get_avg_price(symbol=symbol)['price'])
+    # percent_change_till_zone_data=[]
+    # for zone in zones:
+    #     percent_change_till_zone_data.append([zone[0],zone[-1],percent_change_till_zone(zone,current_price)])
+    # return percent_change_till_zone_data
+
+client = Client(keys.api_key, keys.secret_key)
+# top_coins = top_volatile_and_volume_coins()
+# for coin in top_coins:
+#     zones=coin_levels(coin,'15m','2000')
+#     zones=combine_coin_levels(zones)
+#
+symbol = 'STORJUSDT'
 rewardrisk = 3
-zones = combine_levels(levels)
-
-# exclude uninformative zones
-# zones=filter(lambda zone: len(zone)>4,zones)
-# TODO: separate low range zones=levels (determine percent) from actual zones
-# determine max percent of zone
-priceChangePercent = Decimal(client.get_ticker(symbol=symbol)['priceChangePercent']) / rewardrisk  # magic number
-for i in range(len(zones)):
-    # if zone is large, divide into small zones with less step_percent
-    if (Decimal(zones[i][-1]) / Decimal(zones[i][0])) > 1 + (abs(priceChangePercent) / 100):
-        large_zone_levels = zones[i]
-        combine_levels(large_zone_levels, step_percent / rewardrisk / 2)
-        for j in range(len(large_zone_levels)):
-            large_zone_levels.append(large_zone_levels[j])
-zones = list(filter(lambda zone: Decimal(zone[-1]) / Decimal(zone[0]) > step_percent, zones))  # magic number
-
-current_price = Decimal(client.get_avg_price(symbol=symbol)['price'])
+zones=coin_levels(symbol,'15m','2000')
+zones=combine_coin_levels(zones)
+for zone in zones:
+    print(zone)
+zones=clear_coin_zones_data(symbol,zones,rewardrisk)
+current_price=Decimal(client.get_avg_price(symbol=symbol)['price'])
 for zone in zones:
     print(zone[0],zone[-1],percent_change_till_zone(zone,current_price))
 
-# >1.00'dailycahge'% delete zones
 
-# print(frame)
-# print(frame.loc[lambda frame: frame['Volume'].astype(float)>50000])
+# >1.00'dailycahge'% delete zones
 
 # ob=custom_order_book(symbol="BTCUSDT",custom_interval_multiplicator=100,limit=300)
 # ob=ob[ob.quantity>6]
@@ -186,7 +190,7 @@ for zone in zones:
 # algorithm:
 # 1) choose only top volatile+large volume coins
 # 2) find zones and levels
-# 3) check how many percent till this levels
+# 3) check how many percent till these levels
 # 4) if not much(<5%) turn on algorithm
 # 5) if there is large limit orders, act long/short
-# 6) if there no limit orders, wait
+# 6) if there is no limit orders, wait
