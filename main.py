@@ -1,6 +1,7 @@
 from binance.client import Client
 import keys
 import pandas as pd
+import numpy as np
 import math
 from decimal import Decimal
 
@@ -18,14 +19,14 @@ def top_volatile_and_volume_coins(amount_to_show=3):
     return top_coin
 
 
-def custom_order_book(symbol, custom_interval_multiplicator=10, limit=100):
+def custom_order_book(symbol, custom_interval_multiplicator=10,limit=100):
     # Important: function sends order book with empty levels, so amount of rows can be more than limit
     # If you dont want to see levels with 0 quantity orders - filter data frame
     # TODO: Dont repeat yourself
-    order_book = client.get_order_book(symbol=symbol, limit=limit)  # spot order book
-    default_interval = Decimal(order_book['bids'][0][0]) - Decimal(order_book['bids'][1][0])
+    custom_order_book.custom_interval_multiplicator=custom_interval_multiplicator
+    order_book = client.get_order_book(symbol=symbol, limit=limit)
+    default_interval = order_book_default_interval(order_book)
     custom_interval = Decimal(str(custom_interval_multiplicator)) * Decimal(str(default_interval))
-    print(order_book, len(order_book['asks']), len(order_book['bids']))
 
     # get bids data
     bids = pd.DataFrame(order_book["bids"], columns=['price', 'quantity'], dtype=float)
@@ -44,7 +45,7 @@ def custom_order_book(symbol, custom_interval_multiplicator=10, limit=100):
     min_ask_level = math.floor(min(asks.price) / float(custom_interval)) * custom_interval
     max_ask_level = (math.ceil(max(asks.price) / float(custom_interval)) + 1) * custom_interval
     custom_orderbook_levels = [float(min_ask_level + custom_interval * x) for x in range
-    (int((max_ask_level - min_ask_level) / custom_interval) - 1)]
+    (int((max_ask_level - min_ask_level) / custom_interval))]
     asks["custom"] = pd.cut(asks.price, bins=custom_orderbook_levels, right=False, precision=10)
     asks = asks.groupby("custom").agg(quantity=("quantity", "sum"), side=("side", "first")).reset_index()
     asks["label"] = asks.custom.apply(lambda x: x.left)
@@ -52,6 +53,8 @@ def custom_order_book(symbol, custom_interval_multiplicator=10, limit=100):
     order_book = pd.concat([asks.iloc[::-1], bids.iloc[::-1]])
     return order_book
 
+def order_book_default_interval(order_book):
+    return Decimal(order_book['bids'][0][0]) - Decimal(order_book['bids'][1][0])
 
 def last_data(symbol, interval, lookback):
     frame = pd.DataFrame(client.get_historical_klines(symbol, interval, lookback + 'min ago UTC'))
@@ -127,6 +130,7 @@ def combine_coin_levels(levels, step_percent=1.005):
             zone.append(level)
         else:
             if len(zone) > 2:
+                zone=sorted(zone)
                 zones.append(zone)
             zone = []
     return zones
@@ -135,18 +139,22 @@ def combine_coin_levels(levels, step_percent=1.005):
 def percent_change_till_zone(zone, current_price):
     # for every zone, calculate price percent change till next zone over current price
     priceChange = 0
+    zone.sort()
     # if current price is lower than zone
     if (current_price / Decimal(zone[0])) < 1 and (current_price / Decimal(zone[-1])) < 1:
-        priceChange = 1 / min(current_price / Decimal(zone[-1]), current_price / Decimal(zone[0]))
+        # priceChange = 1 / max(current_price / Decimal(zone[-1]), current_price / Decimal(zone[0]))
+        priceChange=Decimal(zone[0])/current_price
     # if current price is higher than zone
     elif (current_price / Decimal(zone[0])) > 1 and (current_price / Decimal(zone[-1])) > 1:
-        priceChange = -max(current_price / Decimal(zone[0]), current_price / Decimal(zone[-1])) + 1
+        # priceChange = -max(current_price / Decimal(zone[0]), current_price / Decimal(zone[-1])) + 1
+        priceChange=Decimal(zone[-1])/current_price
     # if current price is into consolidation
     elif (current_price / Decimal(zone[0])) > 1 and (current_price / Decimal(zone[-1])) < 1:
-        priceChange = min(current_price / Decimal(zone[-1]) - 1, 1 / current_price / Decimal(zone[0]))
+        # priceChange = min(current_price / Decimal(zone[-1]) - 1, 1 / current_price / Decimal(zone[0]))
+        priceChange=min(Decimal(zone[-1])/current_price,Decimal(zone[0])/current_price)
     return priceChange
 
-def clear_coin_zones_data(symbol,zones,rewardrisk,step_percent=1.005):
+def clear_coin_zones(symbol,zones,rewardrisk,step_percent=1.005):
     # determine max percent of zone
     priceChangePercent = Decimal(client.get_ticker(symbol=symbol)['priceChangePercent']) / rewardrisk
     for zone in zones:
@@ -155,6 +163,7 @@ def clear_coin_zones_data(symbol,zones,rewardrisk,step_percent=1.005):
             splitted_zone=filter(lambda zone:len(zone)>3,splitted_zone)
             zones.remove(zone)
             for little_zone in splitted_zone:
+                little_zone=sorted(little_zone)
                 zones.append(little_zone)
     return zones
     # current_price = Decimal(client.get_avg_price(symbol=symbol)['price'])
@@ -164,28 +173,41 @@ def clear_coin_zones_data(symbol,zones,rewardrisk,step_percent=1.005):
     # return percent_change_till_zone_data
 
 client = Client(keys.api_key, keys.secret_key)
-# top_coins = top_volatile_and_volume_coins()
-# for coin in top_coins:
-#     zones=coin_levels(coin,'15m','2000')
-#     zones=combine_coin_levels(zones)
-#
-symbol = 'STORJUSDT'
 rewardrisk = 3
-zones=coin_levels(symbol,'15m','2000')
-zones=combine_coin_levels(zones)
-for zone in zones:
-    print(zone)
-zones=clear_coin_zones_data(symbol,zones,rewardrisk)
-current_price=Decimal(client.get_avg_price(symbol=symbol)['price'])
-for zone in zones:
-    print(zone[0],zone[-1],percent_change_till_zone(zone,current_price))
-
-
-# >1.00'dailycahge'% delete zones
-
-# ob=custom_order_book(symbol="BTCUSDT",custom_interval_multiplicator=100,limit=300)
-# ob=ob[ob.quantity>6]
-# print(ob)
+custom_interval_multiplicator=10
+top_coins = top_volatile_and_volume_coins()
+for coin in top_coins:
+    zones=coin_levels(coin,'15m','2000')
+    zones=combine_coin_levels(zones)
+    zones = clear_coin_zones(coin, zones, rewardrisk)
+    min_percent=2 # random value
+    current_price = Decimal(client.get_avg_price(symbol=coin)['price'])
+    zone_to_trade=[]
+    for zone in zones:
+        if min_percent>percent_change_till_zone(zone,current_price) and percent_change_till_zone(zone,current_price)>1.01:
+            min_percent=percent_change_till_zone(zone,current_price)
+            zone_to_trade=zone
+    if 1.01<min_percent<1.05 and len(zone_to_trade)!=0:  # Start trade
+        # get order book with zone included
+        delta_to_show=0  # delta between zone and current_price
+        if (min_percent<1):
+            delta_to_show=current_price-zone_to_trade[-1]
+        elif (min_percent>=1):
+            delta_to_show=abs(current_price-Decimal(zone_to_trade[-1]))
+        order_book = client.get_order_book(symbol=coin, limit=2)
+        default_interval = order_book_default_interval(order_book)
+        limit=math.ceil(delta_to_show/default_interval)+1
+        order_book = custom_order_book(coin, custom_interval_multiplicator, limit)
+        order_book.columns=['Custom Interval','Volume','Type','Price to show']
+        # sum volume in zone
+        print(order_book,zone_to_trade)
+        round_precise=default_interval.as_tuple().exponent
+        # condition =   ((order_book['Price to show'] - (np.floor(zone_to_trade[0] * round_precise) / round_precise)) >= 0) \
+        #             & (((np.ceil(zone_to_trade[-1] * round_precise) / round_precise)- order_book['Price to show']) >= 0)
+        condition=((order_book['Price to show']-zone_to_trade[0])>=0) & ((zone_to_trade[-1]-order_book['Price to show'])>=0)
+        zone_total_volume=order_book.loc[condition,'Volume'].sum() # does not add value in bottom
+        print(zone_total_volume)
+        #TODO: fix condition (it does not include bottom line). Estimate which zone_total_volume should be enough to start trade.
 
 # algorithm:
 # 1) choose only top volatile+large volume coins
