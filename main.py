@@ -26,7 +26,7 @@ def custom_order_book(symbol, custom_interval_multiplicator=10,limit=100):
     # Important: function sends order book with empty levels, so amount of rows can be more than limit
     # If you dont want to see levels with 0 quantity orders - filter data frame
     # TODO: Dont repeat yourself
-    custom_order_book.custom_interval_multiplicator=custom_interval_multiplicator
+    # custom_order_book.custom_interval_multiplicator=custom_interval_multiplicator
     order_book = client.get_order_book(symbol=symbol, limit=limit)
     default_interval = order_book_default_interval(order_book)
     custom_interval = Decimal(str(custom_interval_multiplicator)) * Decimal(str(default_interval))
@@ -70,48 +70,6 @@ def last_data(symbol, interval, lookback):
     frame = frame.astype(float)
     return frame
 
-
-# def strategy(buy_amt, SL=0.985, Target=1.02, open_position=False):
-#     try:
-#         asset = top_coin()
-#         df = last_data(asset, '1m', '120')
-#     except:
-#         time.sleep(61)
-#         asset = top_coin()
-#         df = last_data(asset, '1m', '120')
-#
-#     qty = round(buy_amt / df.Close.iloc[-1], 1)
-#
-#     if ((df.Close.pct_change() + 1).cumprod()).iloc[-1] > 1:
-#         print(asset)
-#         print(df.Close.iloc[-1])
-#         print(qty)
-#         order = client.create_order(symbol=asset, side='BUY', type='MARKET', quantity=qty)
-#         print(order)
-#         buyprice = float(order['fills'][0]['price'])
-#         open_position = True
-#
-#         while open_position:
-#             try:
-#                 df = last_data(asset, '1m', '2')
-#             except:
-#                 print('Restart after 1 min')
-#                 time.sleep(61)
-#                 df = last_data(asset, '1m', '2')
-#
-#             print(f'Price ' + str(df.Close[-1]))
-#             print(f'Target ' + str(buyprice * Target))
-#             print(f'Stop ' + str(buyprice * SL))
-#             if df.Close[-1] <= buyprice * SL or df.Close[-1] >= buyprice * Target:
-#                 order = client.create_order(symbol=asset, side='SELL', type='MARKET', quantity=qty)
-#                 print(order)
-#                 break
-#     else:
-#         print('No find')
-#         time.sleep(20)
-#     while True:
-#         strategy(15)
-
 def coin_levels(symbol,interval,lookback):
     frame=last_data(symbol,interval,lookback)
     if frame.empty:
@@ -121,7 +79,7 @@ def coin_levels(symbol,interval,lookback):
         levels.append(row['High'])
         levels.append(row['Low'])
         levels.append(row['Close'])
-        # levels.append(row['Open'])
+        # levels.append(row['Open']) # Why not?
     levels = sorted(levels)
     return levels
 
@@ -212,28 +170,22 @@ for coin in top_coins:
         order_book = custom_order_book(coin, custom_interval_multiplicator, limit)
         order_book.columns=['Custom Interval','Volume','Type','Price to show']
         # sum volume in zone
-        print(order_book,zone_to_trade)
+        # print(order_book,zone_to_trade)
         round_precise=abs(default_interval.as_tuple().exponent)
-        print(round_precise)
+        # print(round_precise)
         # condition =   ((order_book['Price to show'] - (np.floor(zone_to_trade[0] * round_precise) / round_precise)) >= 0) \
         #             & (((np.ceil(zone_to_trade[-1] * round_precise) / round_precise)- order_book['Price to show']) >= 0)
         # condition=((order_book['Price to show']-zone_to_trade[0])>=0) & ((zone_to_trade[-1]-order_book['Price to show'])>=0)
         # zone_total_volume=order_book.loc[condition,'Volume'].sum() # does not add value in bottom
         # some coins cost is 0.00.., and math.ceil() round price to 1. To fix that, round_precise calculations is needed
         # print(math.ceil(zone_to_trade[0] * round_precise)/round_precise)
-        print(zone_to_trade[0],round(zone_to_trade[0],round_precise))
+        # print(zone_to_trade[0],round(zone_to_trade[0],round_precise))
         zone_to_trade_total_volume = order_book.loc[(order_book['Price to show'] >= round(zone_to_trade[0]-float(default_interval*custom_interval_multiplicator),round_precise))
                                          & (order_book['Price to show'] <= zone_to_trade[-1]), 'Volume']
-        print(zone_to_trade_total_volume)
+        # print(zone_to_trade_total_volume)
         zone_to_trade_total_volume=zone_to_trade_total_volume.sum()
         order_book_total_volume = order_book['Volume'].sum()
-        print(zone_to_trade_total_volume,order_book_total_volume)
-
-        #TODO: iceberg orders, bot statistics, while true loop, stop loss, real account buy/sell,
-        #      magic numbers correction, take profit not in %, but based on orderbook data,
-        #      estimations how often to call observe coins, how far to look in historical data,
-        #      trades based on how old is zone, how many times price came to it, fix bug with showing not enough data in orderbook (appeares kinda randomly)
-
+        # print(zone_to_trade_total_volume,order_book_total_volume)
 
         # Magic numbers down there. They are estimated empirically
         # if low volume, go breakout
@@ -257,3 +209,15 @@ for coin in top_coins:
 # 4) if not much(<5%) turn on algorithm
 # 5) if there is large limit orders, trade bounce
 # 6) if there is no limit orders, trade breakout
+
+# TODO:
+# Very primitive way to understand go bounce or breakout. Also breakouts mostly now working now.
+# Possible imporvements: how far to look in historical data, trades based on how old is zone, how many times price came to it;
+# bot statistics
+# take profit not in %, but based on orderbook data
+# rewrite orderbook with bins (coin levels)
+# Firstly get 1h data, and then more precisly in 5m
+# Got spot coins, futures are needed
+# Keys are open
+# Commented code snippets are useless
+# Total responding time is ~5 sec
